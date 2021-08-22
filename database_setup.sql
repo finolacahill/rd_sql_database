@@ -1,7 +1,6 @@
-/*CREATE DATABASE WONKA;
-USE WONKA;*/
-create database wonka;
-use wonka;
+CREATE DATABASE WONKA;
+USE WONKA;
+
 ###############################################
 /* CREATING AND POPULATING TABLES */
 ##############################################
@@ -2376,7 +2375,9 @@ GROUP BY product_development.product_id;
 
 select * from cocktail_recipes;
 
- /* cocktail costs view */
+ /* cocktail costs view.
+ The "if null" statements convert the cost of a missing ingredient to 0.
+ For instance, a product may not contain alcohol and hence alcohol cost should be zero.*/
  create view cocktail_costs as
  select product_development.product_id,
 		IFNULL(sum(alcohol_cost * serving_size), 0) as alcohol_cost,
@@ -2416,26 +2417,49 @@ and product_development.product_id = product_ingredients.product_id
 group by product_development.product_id;
 
 
-/* Keywords View */
+/* Keywords View - collecting all possible keywords about a product together in one view.*/
 create view product_keywords as
 select product_id, ingredient_id as keyword from product_ingredients
 UNION
-select product_id, ingredient_keyword from product_ingredients left join ingredient_keywords on product_ingredients.ingredient_id = ingredient_keywords.ingredient_id where ingredient_keyword is not null
+select product_id, ingredient_keyword
+from product_ingredients left join ingredient_keywords on product_ingredients.ingredient_id = ingredient_keywords.ingredient_id
+where ingredient_keyword is not null
 UNION
-select product_id, meat_type from product_ingredients left join meat on meat_name = ingredient_id where meat_name is not null
+select product_id, meat_type from product_ingredients
+left join meat on meat_name = ingredient_id where meat_name is not null
 UNION
-select product_id, ingredient_type from product_ingredients left join ingredients on ingredient_id = ingredient_name where ingredient_name is not null
+select product_id, ingredient_type from product_ingredients left join ingredients on ingredient_id = ingredient_name
+where ingredient_name is not null
 UNION
-select product_id, wine_type from product_ingredients left join wine on ingredient_id = wine_name where wine_name is not null
+select product_id, wine_type from product_ingredients left join wine on ingredient_id = wine_name
+where wine_name is not null
 UNION
-select product_id, sauce_type from product_ingredients left join sauce on ingredient_id = sauce_name where sauce_name is not null;
-select * from product_keywords;
+select product_id, alcohol_type from product_ingredients left join alcohol on ingredient_id = alcohol_name
+where alcohol_name is not null
+UNION
+select product_id, softdrink_type from product_ingredients left join softdrink on ingredient_id = softdrink_name
+where softdrink_name is not null
+UNION
+select product_id, sauce_type from product_ingredients left join sauce on ingredient_id = sauce_name
+where sauce_name is not null
+UNION
+select product_id, cheese_type from product_ingredients left join cheese on ingredient_id = cheese_name
+where cheese_name is not null
+UNION
+select product_id, produce_type from product_ingredients left join produce on ingredient_id = produce_name
+where produce_name is not null;
+
 
 /* A view on average scores from development */
 create view development_phase as
-select product_development.product_id, development_phase, count(test_number) as test_number, avg(test_score) as average_score
-from product_development left join testing on product_development.product_id = testing.product_id
+select product_development.product_id,
+	   development_phase, count(test_number) as test_number,
+       avg(test_score) as average_score
+from product_development
+left join testing
+on product_development.product_id = testing.product_id
 group by product_development.product_id;
+
 
 /* A view on beverage pairings */
 create view alcohol_product_pairings as
@@ -2450,8 +2474,8 @@ ORDER BY matches DESC;
 
 
 /* A view on price per ml/gram for every ingredient*/
-create view ingredient_prices as
-select ingredient_name, alcohol_cost from ingredients left join alcohol on alcohol_name = ingredient_name where alcohol_name is not null
+create view ingredient_costs as
+select ingredient_name, alcohol_cost as ingredient_costs from ingredients left join alcohol on alcohol_name = ingredient_name where alcohol_name is not null
 UNION
 select ingredient_name, base_cost from ingredients left join base on base_name = ingredient_name where base_name is not null
 UNION
@@ -2471,7 +2495,9 @@ select ingredient_name, softdrink_cost from ingredients left join softdrink on s
 #########################################
 
 
-/* Get namelets for a given product id*/
+/* Get namelets for a given product id.
+For each matched keyword, get the before and after namelets,
+then return a cartesion join of those namelets.*/
 DELIMITER //
 CREATE PROCEDURE name_product (
 IN selected_product VARCHAR(255))
@@ -2521,7 +2547,8 @@ DELIMITER ;
 select * from product_development;
 delete from product_development where product_type = "test1";*/
 
-/* A procedure for creating a new "traditional" product in development*/
+/* A procedure for creating a new "traditional" product in development. Enter product type
+and also its' name (as it is a "traditional product" i.e. mojhito).*/
 DELIMITER //
 CREATE PROCEDURE new_traditional_dev_product (
 IN new_product_type VARCHAR(255),
@@ -2561,7 +2588,7 @@ delete from product_names where product_name = 'test-name';
 delete from production where product_type = 'test';
 */
 
-/* A procedure to move a product from development to  */
+/* A procedure to move a product from development to production */
 DELIMITER //
 CREATE PROCEDURE move_to_product(
 IN chosen_product_id VARCHAR(255))
@@ -2578,6 +2605,7 @@ BEGIN
 	ELSE
 		SET new_type = 'original';
 	END IF;
+    /* If not approved for production, stop procedure*/
     IF p_phase != 'approved' THEN
 		 SIGNAL SQLSTATE '45000'
          SET MESSAGE_TEXT = 'Item is not approved for production';
@@ -2589,6 +2617,7 @@ BEGIN
 	where product_id = chosen_product_id
 	and development_phase = 'approved';
     
+    /* If traditional product, move product name to production names table */
     IF is_original = 'false' THEN
 		INSERT INTO product_names(product_id, product_name)
         select product_id, product_name from 
@@ -2599,6 +2628,7 @@ BEGIN
         where chosen_product_id = product_id;
 	END IF;
 	
+    /*update status in the development table*/
     UPDATE product_development
     set development_phase = 'in production'
     where product_development.product_id = chosen_product_id;
@@ -2606,8 +2636,8 @@ END //
 DELIMITER ;
 
 ## Uncomment below to test procedure to move from dev to production
-/*
-call new_traditional_dev_product('testing', 'test_name');
+
+/*call new_traditional_dev_product('testing', 'test_name');
 # Can see new product with type 'testing' in development
 select * from product_development;
 # Can see new name 'test_name'
@@ -2654,9 +2684,9 @@ END //
 DELIMITER ;
 
 # Uncomment below to test trigger
-/*
+
 # Will fail as product is in production
-select * from production;
+/*select * from production;
 select * from product_ingredients;
 update product_ingredients
 set serving_size = serving_size + 1
@@ -2681,17 +2711,16 @@ END //
 DELIMITER ;
 
 # Uncomment below to test safeguard_external_names trigger*/
+# Will fail as is external prodcut name
 /*update product_names
 set product_name = 'riesling'
 where product_id = 'external_1';*/
-
-
 
 DELIMITER //
 CREATE TRIGGER check_ingredient_details BEFORE INSERT
 ON product_ingredients FOR EACH ROW
 BEGIN
-	IF NOT EXISTS(select ingredient_name from ingredient_prices where ingredient_name = new.ingredient_id) THEN
+	IF NOT EXISTS(select ingredient_name from ingredient_costs where ingredient_name = new.ingredient_id) THEN
 		SIGNAL SQLSTATE '45000'
 		SET MESSAGE_TEXT = 'Ingredient cost details missing from database';
 	END IF;
@@ -2719,7 +2748,9 @@ BEGIN
 DELIMITER ;
 
 # Uncomment below to test check_test_number trigger
-/*insert into testing(product_id, test_score, test_number)
+# Will fail as test number is out of sequence
+/*
+insert into testing(product_id, test_score, test_number)
 values('wonk_1', 0, 10);*/
 
 
@@ -2857,8 +2888,6 @@ where (development_phase = 'approved'
 or development_phase = 'in production')
 and product_development.product_id = pizza_recipes.product_id;
 
-select * from testing;
-
 
 /* average score of ingredients*/
 select ingredient_id, AVG(test_score) as avg_test_score
@@ -2869,7 +2898,8 @@ group by ingredient_id
 ORDER by avg_test_score DESC;
 
 /* checking percentage matching with previously developed products*/
-select product_id, IFNULL(count(ingredient_name), 0) / COUNT(ingredient_id) * 100 as match_percentage 
+select product_id,
+	   IFNULL(count(ingredient_name), 0) / COUNT(ingredient_id) * 100 as match_percentage 
 from product_ingredients
 left join ingredients on ingredient_id = ingredient_name
 and (ingredient_name = 'artichoke hearts'
